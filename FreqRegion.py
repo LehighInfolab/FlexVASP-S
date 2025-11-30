@@ -1,0 +1,183 @@
+from DataSets_Preprocessing.DataSets_Preprocessing import DeepVaspS
+import numpy as np
+import functools
+import random
+import datetime
+import os
+from tqdm import tqdm
+
+
+def gen_overlaps(working_directory, labels_set, k, overlap_num = 1000):
+
+    """
+    #################################################################################
+    #      generate 1000 overlaps for each protein based on 600 snapshots           #
+    #################################################################################
+    :param working_directory:
+    :param labels_set: enolase or serine protease
+    :param overlap_num: generate how many overlaps for each protein
+    :param k: how many snapshots used to generate overlaps
+    :return:
+    """
+
+    starttime = datetime.datetime.now()
+
+    # init_filename = '{}{}/{}-{}-{}.cnn'.format(working_directory, labels_set[0][0], labels_set[0][0], '050', '000')
+    init_filename = '{}{}-CNN//{}_1-025.SURF-clean.SURF.cnn'.format(working_directory, labels_set[0][0], labels_set[0][0])
+    x_dim, y_dim, z_dim = DeepVaspS.voxel_parser(init_filename)[1:4]
+
+    # generate random index of "k"(50) samples from 600 snapshots (protein MD simulation), repeat "overlap_num"(1000) times
+    overlap_sets = []
+    for i in range(0, overlap_num):
+        overlap_sets.append(random.sample(range(1, 1001), k))
+
+    # e.g. subfamily is ['1mdr', '2ox4', ] or ['2pgw'] or ['1iyx', '3otr', '1te6']
+    for subfamily in labels_set:
+
+        # protein is each PDB code, e.g. 1te6, 1mdr
+        for protein in subfamily:
+            l = 0
+
+            #overlap_sets is a 1000-length empty list
+            #each element(one_set_overlap) in overlap_sets is a 50-length array with index inside
+            for one_set_overlap in overlap_sets:
+
+                # one_overlap is an empty 50-length array with shape "x_dim, y_dim, z_dim, 1"
+                one_overlap = np.empty((k, 1,x_dim, y_dim, z_dim))
+                o = 0
+
+                # img_index is each index of cnn file. e.g 001, or 020 ....
+                for img_index in one_set_overlap:
+
+                    # parser each cnn file and save it into one_overlap
+                    # file_name = '{}{}/{}-{}-{}.cnn'.format(working_directory, protein, protein, '050',
+                    #                                        str(img_index).rjust(3, '0'))
+                    file_name = '{}{}-CNN//{}_{}-025.SURF-clean.SURF.cnn'.format(working_directory, protein,
+                                                                              protein,img_index)
+                    one_overlap[o] = (DeepVaspS.voxel_parser(file_name)[0])
+                    o += 1
+
+                # k_overlap: calculate one overlap based on all selected k snapshots
+                k_overlap = functools.reduce(lambda a, b: np.minimum(a, b), one_overlap)
+
+                # save each overlap array as npy
+                # np.save("{}{}_overlap/{}-{}-{}".format(working_directory, protein,
+                #                                "overlap", '050', str(l).rjust(3, '0')), k_overlap)
+                np.save("{}{}_overlap_{}//{}-{}-{}".format(working_directory, protein, k, protein,
+                                                       "overlap", str(l)), k_overlap)
+                l += 1
+
+    endtime = datetime.datetime.now()
+    # time 0:15:32.571845
+    print(endtime - starttime)
+
+
+
+def gen_unions(working_directory, labels_set, k, union_num =500, overlap_num =1000):
+
+    """
+    ####################################################################################
+    #     generate 500 unions for each protein based on 1000 overlaps                  #
+    ####################################################################################
+    :param working_directory:
+    :param labels_set: enolase or serine protease
+    :param union_num: generate how many unions for each protein
+    :param overlap_num: how many overlaps used to generate one union
+    :return:
+    """
+    starttime = datetime.datetime.now()
+    # init_filename = '{}{}/{}-{}-{}.cnn'.format(working_directory, labels_set[0][0],
+    #                                            labels_set[0][0], '050', '000')
+    init_filename = '{}{}-CNN//{}_1-025.SURF-clean.SURF.cnn'.format(working_directory, labels_set[0][0], labels_set[0][0])
+
+    x_dim, y_dim, z_dim = DeepVaspS.voxel_parser(init_filename)[1:4]
+
+    #union_sets is a 600-length list,
+    #each element in union_sets is one 500-length list with index inside
+    union_sets = []
+    for i in range(0, union_num):
+        union_sets.append(random.sample(range(0, 1000), 500))
+
+    # subfamily is 3, includes ['1mdr', '2ox4', ], ['2pgw'], ['1iyx', '3otr', '1te6']
+    for subfamily in labels_set:
+
+        # protein is just one PDB code, e.g. 1te6, 1mdr
+        for protein in subfamily:
+                l = 0
+
+                #one_set_union is each union generated by 500 overlaps
+                for one_set_union in union_sets:
+
+                    #one_union is an empty array to save 500 overlaps, which is used to generate 1 union
+                    one_union = np.empty((union_num,1, x_dim, y_dim, z_dim))
+                    u = 0
+
+                    #overlap_index is each index in 500 overlaps.e.g. overlap-050-541, 541 is overlap_index
+                    for overlap_index in one_set_union:
+                        # file_name = '{}{}_overlap/{}-{}-{}.npy'.format(working_directory, protein, "overlap", '050',
+                        #                                        str(overlap_index).rjust(3, '0'))
+                        file_name = '{}{}_overlap_{}//{}-{}-{}.npy'.format(working_directory, protein, k,
+                                                                             protein, "overlap",str(overlap_index))
+                        one_union[u] = np.load(file_name)
+                        u += 1
+
+                    k_union = functools.reduce(lambda a, b: np.maximum(a, b), one_union)
+                    np.save("{}{}_union_{}//{}-{}-{}".format(working_directory, protein,k,
+                                                               protein,"union", str(l)), k_union)
+                    l+=1
+
+    endtime = datetime.datetime.now()
+    #0:16:39.153374
+    print(endtime - starttime)
+
+def mkdir(working_directory,labels_set):
+
+    k_list= [15,25,50,70,100,150,200]
+
+    protein_list = [i for sub in labels_set for i in sub]
+    for p in protein_list:
+        for k in k_list:
+            # print(working_directory+p+"_overlap_""{} ".format(k))
+            # print(working_directory+p+"_union_"+"{} ".format(k))
+            os.makedirs(working_directory + p +"_overlap_"+"{}".format(k), exist_ok=True)
+            os.makedirs(working_directory + p + "_union_" + "{}".format(k), exist_ok=True)
+            print("yes")
+
+
+
+if __name__ == '__main__':
+
+    # ENOLASE_LABELS_SET = [['1mdr', '2ox4'], ['2pgw'], ['1iyx', '3otr', '1te6','1ebh']]
+    EnolaseMuconate = ["2PGW", "1BKH", "3DGB", "3FJ4", "3I4K", "2ZAD", "3DEQ", "3DER", "1JPM", "1TKK"]
+    EnolaseMandelate = ["2OX4", "1MDR", "1mdl", "1mns", "2OG9"]
+    Enolase = ["1E9I", "1PDY", "1IYX", "1EBH", "1TE6", "1W6T", "2XSX", "2PA6", "3OTR", "3QN3"]
+    ENOLASE_LABELS_SET = [EnolaseMandelate, EnolaseMuconate, Enolase]
+
+
+    SerProtTrypsin = ["2f91", "1fn8", "2eek", "1h4w", "1bzx", "1aq7", "1ane", "1aks", "1trn", "1a0j"]
+    SerProtChymotrypsin = ["1eq9", "4cha", "1kdq", "8gch"]
+    SerProtElastase = ["1elt", "1b0e"]
+    SERPROT_LABELS_SET = [SerProtTrypsin, SerProtChymotrypsin, SerProtElastase]
+    #labels_set = ENOLASE_LABELS_SET
+    #labels_set = SERINE_PROTEASE_LABELS_SET
+    enolase_path = '/home/yal421/Deep-Vasp/Deep-Vasp-GPU/DataSet/EnolaseNew//'
+    serProt_path = '/home/yal421/Deep-Vasp/Deep-Vasp-GPU/DataSet/SerprotNew//'
+
+    # mkdir(enolase_path, ENOLASE_LABELS_SET)
+    # mkdir(serProt_path, SERPROT_LABELS_SET)
+
+    k_list = [15,25,50,70,100,150,200]
+    # mkdir(enolase_path, ENOLASE_LABELS_SET)
+
+    pbar = tqdm(k_list, ncols=70)
+    # for k in pbar:
+    #     # gen_overlaps(enolase_path, ENOLASE_LABELS_SET, k)
+    #     gen_unions(enolase_path, ENOLASE_LABELS_SET,k)
+    
+    pbar = tqdm(k_list, ncols=70)
+    for k in pbar:
+        gen_overlaps(serProt_path, SERPROT_LABELS_SET, k)
+        gen_unions(serProt_path, SERPROT_LABELS_SET, k)
+
+
+
